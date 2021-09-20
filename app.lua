@@ -1,49 +1,44 @@
 local table = require "table"
+local tween = require "tween"
 local app = {}
 local ground = {}
 local lanes = {}
 local maxlane = 0
 local font, fontHeight
-local laneWidth = 25 -- TODO: make dynamic
-local pillHeight = 5 -- TODO: make dynamic
+local laneWidth = 25 -- TODO: make dynamic based on window
+local pillHeight = 5 -- TODO: make dynamic based on window
 local radians = (3 * math.pi) / 2
+local net = { debug = {} }
 
 function app.once()
   love.window.setDisplaySleepEnabled(true)
-  love.window.setMode(650, 650, { resizable = true, minwidth = 600, minheight = 400 })
-  love.window.setTitle("httpshark")
   love.graphics.setBackgroundColor(0, 0, 0)
+  -- net server
+  love.thread.newThread("network.lua"):start()
 end
 
-function simulateRequest(path)
+function app.quit()
+  love.thread.getChannel("net.stop"):push("stop")
+  local closed = love.thread.getChannel("net.close"):demand(5)
+  print("socket: " .. (closed or "not closed"))
+end
+
+function addRequest(path)
   local lane = lanes[path]
   if not lane then
     lane = { col = maxlane, stackHeight = 0, path = path, requests = {} }
     lanes[path] = lane
     maxlane = maxlane + 1
   end
-  table.insert(lane.requests, { y = 0 })
+  table.insert(lane.requests, { rect = { y = 0 } })
 end
-
-local threadCode = [[
-local timer = require "love.timer"
-local math = require "love.math"
-local paths = {"GET /v1/account/14", "GET /v1/widget/test", "POST /v1/policy/43", "GET /v1/quote/888/detail"}
-while true do
-  local t = love.math.random(1, 16) * 0.25
-  local p = paths[love.math.random(4)]
-  timer.sleep(t)
-  love.thread.getChannel("request"):push(p)
-end
-]]
 
 function app.load()
-  font = love.graphics.newFont("VCR_OSD_MONO_1.001.ttf", 13)
+  lanes = {}
+  --font = love.graphics.newFont("superstar_memesbruh03.ttf", 14)
+  font = love.graphics.newFont("editundo.ttf", 14)
   fontHeight = font:getHeight()
   ground = { height = 50 }
-  -- trigger thread
-  thread = love.thread.newThread(threadCode)
-  thread:start()
 end
 
 function app.reload()
@@ -51,24 +46,38 @@ function app.reload()
 end
 
 function app.update(dt)
-  local path = love.thread.getChannel("request"):pop()
-  if path then
-    simulateRequest(path)
+  local msg = love.thread.getChannel("net.debug"):pop()
+  if msg == "net.debug.clear" then
+    net.debug = {}
+  elseif msg then
+    print("text = " .. msg.text)
+    table.insert(net.debug, msg)
   end
+
+  -- requests
+  local path = love.thread.getChannel("response"):pop()
+  if path then
+    addRequest(path)
+  end
+
   -- pills
   local h = love.graphics.getHeight()
   for i in pairs(lanes) do
     local lane = lanes[i]
-    for r in pairs(lane.requests) do
+    local finishedRequests = {}
+    for r = 1, #lane.requests do
       local request = lane.requests[r]
-      local y = request.y + (dt * 200)
-      if y < h - ground.height - pillHeight - lane.stackHeight then
-        -- TODO: don't be linear
-        request.y = y
-      else
+      request.tweener = request.tweener or tween.new(2, request.rect, { y = (h - ground.height - pillHeight - lane.stackHeight) }, "inCubic")
+      if request.tweener:update(dt) then
         lane.stackHeight = lane.stackHeight + pillHeight
-        lane.requests[r] = nil
+        table.insert(finishedRequests, r)
       end
+    end
+    for r = 1, #finishedRequests do
+      table.remove(lane.requests, r)
+    end
+    if lane.stackHeight > h then
+      lane.stackHeight = 0
     end
   end
 end
@@ -76,9 +85,6 @@ end
 function app.draw()
   local w, h = love.graphics.getWidth(), love.graphics.getHeight()
   love.graphics.setFont(font)
-  -- ground
-  love.graphics.setColor(20 / 255, 20 / 255, 20 / 255)
-  love.graphics.rectangle("fill", 0, h - ground.height, w, ground.height)
   -- lanes
   for i in pairs(lanes) do
     local textWidth = font:getWidth(i)
@@ -96,8 +102,18 @@ function app.draw()
     local lane = lanes[i]
     for r in pairs(lane.requests) do
       local request = lane.requests[r]
-      love.graphics.rectangle("fill", lane.col * laneWidth, request.y, laneWidth, pillHeight)
+      love.graphics.rectangle("fill", lane.col * laneWidth, request.rect.y, laneWidth, pillHeight)
     end
+  end
+  -- ground
+  love.graphics.setColor(20 / 255, 20 / 255, 20 / 255)
+  love.graphics.rectangle("fill", 0, h - ground.height, w, ground.height)
+  -- debug
+  y = 10
+  love.graphics.setColor(1, 1, 1)
+  for _, d in pairs(net.debug) do
+    love.graphics.print(d.text, 150, y)
+    y = y + 15
   end
 end
 

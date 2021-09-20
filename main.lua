@@ -1,4 +1,4 @@
-app = require("app")
+local app = require "app"
 
 lurker = require("lurker")
 lurker.postswap = function()
@@ -21,4 +21,8 @@ end
 
 function love.resize(w, h)
   app.resize(w, h)
+end
+
+function love.quit()
+  return app.quit()
 end
