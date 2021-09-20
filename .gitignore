@@ -1,1 +1,3 @@
 .idea
+release/httpshark_macos.zip
+/dist/httpshark.app/Contents/Resources/httpshark.love
